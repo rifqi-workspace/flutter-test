@@ -13,6 +13,10 @@ on:
           - apk
           - appbundle
           - all
+      # 1. Tambahkan input resumeUrl di sini agar tidak error
+      resumeUrl:
+        description: 'URL callback otomatis dari n8n'
+        required: false
 
 jobs:
   build:
@@ -68,10 +72,16 @@ jobs:
           name: release-aab
           path: build/app/outputs/bundle/release/app-release.aab
 
-      - name: Notify Webhook
+      - name: Notify Webhook / Resume n8n
         if: always()
         run: |
-          curl -X POST https://tap-searches-alfred-mattress.trycloudflare.com \
+          # 2. Gunakan resumeUrl dinamis dari n8n (dengan fallback jika dijalankan manual dari web GitHub)
+          TARGET_URL="${{ github.event.inputs.resumeUrl }}"
+          if [ -z "$TARGET_URL" ]; then
+            TARGET_URL="https://tap-searches-alfred-mattress.trycloudflare.com"
+          fi
+
+          curl -X POST "$TARGET_URL" \
             -H "Content-Type: application/json" \
             -d '{
               "status": "${{ job.status }}",
