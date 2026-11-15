@@ -1,0 +1,69 @@
+name: Manual Dispatch Workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_target:
+        description: 'Target Build / Action'
+        required: true
+        default: 'test'
+        type: choice
+        options:
+          - test
+          - apk
+          - appbundle
+          - all
+
+jobs:
+  build:
+    name: Run ${{ github.event.inputs.build_target }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.5'
+          channel: 'stable'
+          cache: true
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Analyze Project
+        run: flutter analyze
+
+      - name: Run Tests
+        if: ${{ github.event.inputs.build_target == 'test' || github.event.inputs.build_target == 'all' }}
+        run: flutter test
+
+      - name: Build Android APK
+        if: ${{ github.event.inputs.build_target == 'apk' || github.event.inputs.build_target == 'all' }}
+        run: flutter build apk --release
+
+      - name: Build Android App Bundle (AAB)
+        if: ${{ github.event.inputs.build_target == 'appbundle' || github.event.inputs.build_target == 'all' }}
+        run: flutter build appbundle --release
+
+      - name: Upload APK Artifact
+        if: ${{ github.event.inputs.build_target == 'apk' || github.event.inputs.build_target == 'all' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Upload App Bundle Artifact
+        if: ${{ github.event.inputs.build_target == 'appbundle' || github.event.inputs.build_target == 'all' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-aab
+          path: build/app/outputs/bundle/release/app-release.aab
