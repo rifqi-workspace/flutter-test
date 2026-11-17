@@ -47,7 +47,6 @@ jobs:
         run: flutter analyze
 
       - name: Run Tests
-        if: ${{ github.event.inputs.build_target == 'test' || github.event.inputs.build_target == 'all' }}
         run: flutter test
 
       - name: Build Android APK
