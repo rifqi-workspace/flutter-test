@@ -21,7 +21,7 @@ on:
 jobs:
   build:
     name: Run ${{ github.event.inputs.build_target }}
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Repository
