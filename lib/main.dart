@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 
 void main() {
-  // Sengaja dibuat error untuk testing failure di CI GitHub Actions
-  runApp(MyAppYangTidakAda());
+  runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
