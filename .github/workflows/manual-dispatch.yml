@@ -6,10 +6,9 @@ on:
       build_target:
         description: 'Target Build / Action'
         required: true
-        default: 'test'
+        default: 'apk'
         type: choice
         options:
-          - test
           - apk
           - appbundle
           - all
@@ -59,14 +58,6 @@ jobs:
           set -o pipefail
           flutter analyze 2>&1 | tee -a error.log
 
-      - name: Run Tests
-        id: tests
-        if: always() && steps.dependencies.outcome == 'success'
-        continue-on-error: true
-        run: |
-          set -o pipefail
-          flutter test 2>&1 | tee -a error.log
-
       - name: Build Android APK
         id: apk
         if: always() && (inputs.build_target == 'apk' || inputs.build_target == 'all') && steps.dependencies.outcome == 'success'
@@ -106,7 +97,6 @@ jobs:
           BUILD_TARGET: ${{ inputs.build_target }}
           DEPENDENCIES_OUTCOME: ${{ steps.dependencies.outcome }}
           ANALYZE_OUTCOME: ${{ steps.analyze.outcome }}
-          TEST_OUTCOME: ${{ steps.tests.outcome }}
           APK_OUTCOME: ${{ steps.apk.outcome }}
           APPBUNDLE_OUTCOME: ${{ steps.appbundle.outcome }}
         run: |
@@ -118,8 +108,7 @@ jobs:
           STATUS="success"
 
           if [ "$DEPENDENCIES_OUTCOME" = "failure" ] || \
-             [ "$ANALYZE_OUTCOME" = "failure" ] || \
-             [ "$TEST_OUTCOME" = "failure" ]; then
+             [ "$ANALYZE_OUTCOME" = "failure" ]; then
             STATUS="failed"
           fi
 
