@@ -13,82 +13,157 @@ on:
           - apk
           - appbundle
           - all
-      # 1. Tambahkan input resumeUrl di sini agar tidak error
+
       resumeUrl:
         description: 'URL callback otomatis dari n8n'
         required: false
+        type: string
 
 jobs:
   build:
-    name: Run ${{ github.event.inputs.build_target }}
+    name: Run ${{ inputs.build_target }}
     runs-on: ubuntu-latest
 
     steps:
+      - name: Prepare Error Log
+        run: touch error.log
+
       - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '17'
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.47.5'
-          channel: 'stable'
+          channel: stable
           cache: true
 
       - name: Install Dependencies
-        run: flutter pub get
+        id: dependencies
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          flutter pub get 2>&1 | tee -a error.log
 
       - name: Analyze Project
-        run: flutter analyze
+        id: analyze
+        if: always() && steps.dependencies.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          flutter analyze 2>&1 | tee -a error.log
 
       - name: Run Tests
-        run: flutter test
+        id: tests
+        if: always() && steps.dependencies.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          flutter test 2>&1 | tee -a error.log
 
       - name: Build Android APK
-        if: ${{ github.event.inputs.build_target == 'apk' || github.event.inputs.build_target == 'all' }}
-        run: flutter build apk --release
+        id: apk
+        if: always() && (inputs.build_target == 'apk' || inputs.build_target == 'all') && steps.dependencies.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          flutter build apk --release 2>&1 | tee -a error.log
 
-      - name: Build Android App Bundle (AAB)
-        if: ${{ github.event.inputs.build_target == 'appbundle' || github.event.inputs.build_target == 'all' }}
-        run: flutter build appbundle --release
+      - name: Build Android App Bundle
+        id: appbundle
+        if: always() && (inputs.build_target == 'appbundle' || inputs.build_target == 'all') && steps.dependencies.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          flutter build appbundle --release 2>&1 | tee -a error.log
 
       - name: Upload APK Artifact
-        if: ${{ github.event.inputs.build_target == 'apk' || github.event.inputs.build_target == 'all' }}
+        if: always() && steps.apk.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: release-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: warn
 
       - name: Upload App Bundle Artifact
-        if: ${{ github.event.inputs.build_target == 'appbundle' || github.event.inputs.build_target == 'all' }}
+        if: always() && steps.appbundle.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: release-aab
           path: build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: warn
 
-      - name: Notify Webhook / Resume n8n
+      - name: Notify n8n / Resume Workflow
         if: always()
+        env:
+          TARGET_URL: ${{ inputs.resumeUrl }}
+          BUILD_TARGET: ${{ inputs.build_target }}
+          DEPENDENCIES_OUTCOME: ${{ steps.dependencies.outcome }}
+          ANALYZE_OUTCOME: ${{ steps.analyze.outcome }}
+          TEST_OUTCOME: ${{ steps.tests.outcome }}
+          APK_OUTCOME: ${{ steps.apk.outcome }}
+          APPBUNDLE_OUTCOME: ${{ steps.appbundle.outcome }}
         run: |
-          # 2. Gunakan resumeUrl dinamis dari n8n (dengan fallback jika dijalankan manual dari web GitHub)
-          TARGET_URL="${{ github.event.inputs.resumeUrl }}"
           if [ -z "$TARGET_URL" ]; then
-            TARGET_URL="https://tap-searches-alfred-mattress.trycloudflare.com"
+            echo "resumeUrl is empty. Skipping callback."
+            exit 0
           fi
 
-          curl -X POST "$TARGET_URL" \
+          STATUS="success"
+
+          if [ "$DEPENDENCIES_OUTCOME" = "failure" ] || \
+             [ "$ANALYZE_OUTCOME" = "failure" ] || \
+             [ "$TEST_OUTCOME" = "failure" ]; then
+            STATUS="failed"
+          fi
+
+          if { [ "$BUILD_TARGET" = "apk" ] || [ "$BUILD_TARGET" = "all" ]; } && \
+             [ "$APK_OUTCOME" = "failure" ]; then
+            STATUS="failed"
+          fi
+
+          if { [ "$BUILD_TARGET" = "appbundle" ] || [ "$BUILD_TARGET" = "all" ]; } && \
+             [ "$APPBUNDLE_OUTCOME" = "failure" ]; then
+            STATUS="failed"
+          fi
+
+          if [ "$STATUS" = "failed" ]; then
+            ERROR="$(tail -n 100 error.log)"
+          else
+            ERROR="No errors detected."
+          fi
+
+          jq -n \
+            --arg status "$STATUS" \
+            --arg error "$ERROR" \
+            --arg workflow "${{ github.workflow }}" \
+            --arg run_id "${{ github.run_id }}" \
+            --arg run_number "${{ github.run_number }}" \
+            --arg build_target "$BUILD_TARGET" \
+            --arg actor "${{ github.actor }}" \
+            --arg repository "${{ github.repository }}" \
+            --arg html_url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            '{
+              status: $status,
+              error: $error,
+              workflow: $workflow,
+              run_id: $run_id,
+              run_number: $run_number,
+              build_target: $build_target,
+              actor: $actor,
+              repository: $repository,
+              html_url: $html_url
+            }' |
+          curl --fail-with-body \
+            --retry 3 \
+            --retry-delay 2 \
+            --max-time 30 \
+            -X POST "$TARGET_URL" \
             -H "Content-Type: application/json" \
-            -d '{
-              "status": "${{ job.status }}",
-              "workflow": "${{ github.workflow }}",
-              "run_id": "${{ github.run_id }}",
-              "run_number": "${{ github.run_number }}",
-              "build_target": "${{ github.event.inputs.build_target }}",
-              "actor": "${{ github.actor }}",
-              "repository": "${{ github.repository }}",
-              "html_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            }'
+            --data-binary @-
