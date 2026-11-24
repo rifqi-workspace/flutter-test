@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+// Simulasi error sengaja untuk testing CI/n8n error handling
+THIS_WILL_CAUSE_SYNTAX_ERROR_FOR_TESTING;
+
 void main() {
   runApp(const MyApp());
 }
